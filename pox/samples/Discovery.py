@@ -4,44 +4,60 @@ Created on 6 באפר 2013
 @author: user
 '''
 import utils
+from DataModel import DataModel
 import pox.openflow.libopenflow_01 as of
 from pox.lib.packet.ethernet      import ethernet
 from pox.lib.packet.lldp          import lldp, chassis_id, port_id, end_tlv
 from pox.lib.packet.lldp          import ttl, system_description
+from pox.core import core
+
+log = core.getLogger()
 
 class Discovery:
     '''
-    classdocs
+    This class learn the network topology, and saves it in the DataModel class
+    its sends periodic (every DISCOVERY_INTERVAL ) LLDP packets to all connected switches, and updated the topology accordingly
+    in addition its also remove links from the graph when they didn't been active for the X seconds or an indication for link loss occours  
     '''
     __metaclass__ = utils.SingletonType
   
-    
+    LLDP_DST_ADDR  = '\x01\x80\xc2\x00\x00\x0e'
+    DISCOVERY_INTERVAL = 1
+    REMOVE_EXPIRED_INTERVAL = 3
 
     def __init__(self):
         '''
         Constructor
-        '''
-        DISCOVERY_INTERVAL = 1
+        '''        
         self.connected_switches = []
-        self.timer = utils.Timer(DISCOVERY_INTERVAL, self._send_discovery_packets__, [], True)
+        self.discovery_timer = utils.Timer(Discovery.DISCOVERY_INTERVAL, self._send_discovery_packets__, [], True)
+        self.remove_expired_timer = utils.Timer(Discovery.REMOVE_EXPIRED_INTERVAL, self._remove_expired_links, [], True)
+        self.graph = DataModel()
       
+    
+    def _remove_expired_links(self):
+        log.debug('Discovery: removing %i expired links'%(len(self.graph.get_expired_links()))) 
+        #self.graph.delete_expired_links()
+         
+            
     
     def __send_discovery_packets__(self):
         '''
             sends discovery packets to all connected switches
         '''
+        log.debug('Discovery: sending LLDP to %i connected switches %i'%(len(self.connected_switches)))        
         for switch_event in self.connected_switches:
-            self.send_lldp_to_switch(switch_event)
+            self.send_LLDP_to_switch(switch_event)
     
 
-    def send_lldp_to_switch(self,event):
+    def send_LLDP_to_switch(self,event):
         '''
         sending lldp packet to all of a switch ports        
         :param event: the switch ConnectionUp Event
         '''
-        dst = Discovery.LLDP_DST_ADDR # == '\x01\x80\xc2\x00\x00\x0e'
+        dst = Discovery.LLDP_DST_ADDR
         for p in event.ofp.ports:
-            if p.port_no < of.OFPP_MAX:
+            if p.port_no < of.OFPP_MAX:  # @UndefinedVariable
                 # Build LLDP packet
                 src = str(p.hw_addr)
                 port = p.port_no
@@ -75,19 +91,63 @@ class Discovery:
         Use event.dpid for switch ID, and event.connection.send(...) to send messages to the switch.
         '''
         self.connected_switches.append(event)
+        self.set_lldp_rule(event)
+        log.debug('Discovery: switch %i connected'%(event.dpid))
+        self.graph.switch_is_up(event.dpid)
+        
+    def set_LLDP_rule(self,event):
+        '''
+        set a flow rule in the switch
+        to pass all LLDP packets to the controller
+        '''
+        # should i delete old rules ?
+                
+        fm = of.ofp_flow_mod()
+        fm.match.dl_type = ethernet.LLDP_TYPE
+        fm.match.dl_dst = Discovery.LLDP_DST_ADDR
+
+        # Add an action to send to the specified port
+        action = of.ofp_action_output(port=of.OFPP_CONTROLLER)  # @UndefinedVariable
+        fm.actions.append(action)
+        # Send message to switch
+        event.connection.send(fm)
+
         
     def _handle_ConnectionDown(self, event):
         '''
         Will be called when a switch goes down. Use event.dpid for switch ID.
         '''
+        event_to_delete = [up_event for up_event in self.connected_switches if up_event.dpid == event.dpid][0]
+        self.connected_switches.remove(event_to_delete)
+        log.debug('Discovery: switch %i disconnected'%(event.dpid))
+        
+        self.graph.switch_is_down(event.dpid)
+        
     def _handle_PortStatus(self, event):
         '''
         Will be called when a link changes. Specifically, when event.ofp.desc.config is 1, it means that the link is down. Use event.dpid for switch ID and event.port for port number.
         '''
+        if event.ofp.desc.config == 1:
+            #self.graph.link_is_dead(event.dpid, event.port)
+            log.debug('[switch %i]: port %i was disconnected'%(event.dpid, event.port))
+                
     def _handle_PacketIn(self, event):
         '''
         Will be called when a packet is sent to the controller. Same as in the previous part. Use it to find LLDP packets (event.parsed.type == ethernet.LLDP_TYPE) and update the topology according to them.
         '''
+        if event.parsed.type != ethernet.LLDP_TYPE:
+            return
+        
+        pkt = event.parsed
+        lldp_p = pkt.payload
+        ch_id = lldp_p.tlvs[0]
+        po_id = lldp_p.tlvs[1]
+        src_dpid = int(ch_id.id)
+        src_port = int(po_id.id)
+        
+        self.graph.link_is_alive( src_dpid, src_port, event.dpid, event.port)
+        #self._tree_changed
+            
         
     def register_tree_change(self,handler):
         self.handler = handler
