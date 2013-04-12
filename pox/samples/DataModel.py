@@ -24,8 +24,10 @@ class DataModel:
     def switch_is_up(self, switch_id):
         self.graph.add_node(switch_id, SwitchData())
         
-    """Should be called whenever an indication received, that a switch is down"""
+    """Should be called whenever an indication received, that a switch is down.
+    Returns the list of links that were removed"""
     def switch_is_down(self, switch_id):
+        removed_links = []
         if switch_id in self.graph.nodes:
             self.graph.remove_node(switch_id)
             to_delete = []
@@ -33,25 +35,35 @@ class DataModel:
                 if a == switch_id or b == switch_id:
                     to_delete.append((a,b))
             for (a,b) in to_delete:
+                data = self.graph.edges[(a,b)]
+                removed_links.append(a,data.port1,b,data.port2)
                 self.graph.delete_edge(a, b)
             self.update_spanning_tree()
+        return removed_links
 
-    """Should be called whenever an indication received, that a link is down."""
+    """Should be called whenever an indication received, that a link is down.
+    Returns True if this link wasn't already dead"""
     def link_is_dead(self, s1_id, port1, s2_id, port2):
         link = self.graph.get_edge(s1_id, s2_id)
         if link != None and self.__check_ports(link, port1, port2):
             self.graph.delete_edge(s1_id, s2_id)
             self.update_spanning_tree()
+            return True
+        else:
+            return False
               
-    """Should be called whenever an indication received, that a link between two switches is alive"""
+    """Should be called whenever an indication received, that a link between two switches is alive.
+    Returns True if this is a new link"""
     def link_is_alive(self, s1_id, port1, s2_id, port2):
         link = self.graph.get_edge(s1_id, s2_id)
         if link == None:
             link = LinkData(port1, port2)
             self.graph.add_edge(s1_id, s2_id, link)
             self.update_spanning_tree()
+            return True
         else:
             link.last_sync = datetime.now()
+            return False
             
     def get_all_links_for_switch_and_port(self,s_id,port):
         res = []

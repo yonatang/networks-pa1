@@ -34,14 +34,11 @@ class Discovery:
     def _remove_expired_links(self):
         expired_links=self.graph.get_expired_links()
         if len(expired_links) > 0:
-            log.debug('Discovery: removing %i expired links %s' %(len(expired_links),expired_links)) 
+            #log.debug('Discovery: removing %i expired links %s' %(len(expired_links),expired_links)) 
             for (a,port1,b,port2) in expired_links:
-                self.graph.link_is_dead(a, port1, b, port2)
-            print "Expired - allowed links %s" % (self.graph.get_all_allowed_links())
-            print "Expired - forbidden links %s" % (self.graph.get_all_forbidden_links())
+                if self.graph.link_is_dead(a, port1, b, port2):
+                    log.debug('Link is removed due to [timeout]: (%i %i)<->(%i %i)' % (a,port1,b,port2))
             self._tree_changed()
-            #self.graph.delete_expired_links()
-            
     
     def _send_discovery_packets(self):
         '''
@@ -125,8 +122,10 @@ class Discovery:
         self.connected_switches.remove(event_to_delete)
         log.debug('Discovery: switch %i disconnected'%(event.dpid))
         
-        self.graph.switch_is_down(event.dpid)
-        #self._tree_changed()
+        removed_links=self.graph.switch_is_down(event.dpid)
+        for (s1,p1,s2,p2) in removed_links:
+            log.debug('Link is removed due to [switch %i is down]: (%i %i)<->(%i %i)' % (event.dpid,s1,p1,s2,p2))
+        self._tree_changed()
         
     def _handle_PortStatus(self, event):
         '''
@@ -135,12 +134,11 @@ class Discovery:
         dpid=event.dpid
         port=event.port
         if event.ofp.desc.config == 1:
-            #self.graph.link_is_dead(event.dpid, event.port)
             log.debug('[switch %i]: port %i was disconnected'%(dpid, port))
             links = self.graph.get_all_links_for_switch_and_port(dpid, port)
-            log.debug('[switch %i]: mark the following links as dead: %s' % (dpid,links))
             for (s1,p1,s2,p2) in links:
-                self.graph.link_is_dead(s1, p1, s2, p2)
+                if self.graph.link_is_dead(s1, p1, s2, p2):
+                    log.debug('Link is removed due to [port closed]: (%i %i)<->(%i %i)' % (s1,p1,s2,p2))
             if (len(links)>0):
                 self._tree_changed()
             
@@ -159,7 +157,10 @@ class Discovery:
         src_dpid = int(ch_id.id)
         src_port = int(po_id.id)
         #log.debug("Received a LLDP packet on switch %i from %i" % (event.dpid,src_dpid))
-        self.graph.link_is_alive( src_dpid, src_port, event.dpid, event.port)
+        if self.graph.link_is_alive( src_dpid, src_port, event.dpid, event.port):
+            #a new link
+            log.debug("New link was found: (%i %i)<->(%i %i)" % (src_dpid,src_port,event.dpid,event.port))
+        
         self._tree_changed()
             
         
