@@ -149,64 +149,65 @@ class DataModel:
         return res
 
 
-"""
-This is an example that shows all the usage patterns of the model.
-"""
 
 
-print "Hello, World!"
-
-x = DataModel()
-
-"""Adding 4 switches."""
-x.switch_is_up("s1")
-x.switch_is_up("s2")
-x.switch_is_up("s3")
-x.switch_is_up("s4")
-
-"""Indications received that 6 links are alive."""
-x.link_is_alive("s1", 1111, "s2", 1111)
-x.link_is_alive("s1", 2222, "s3", 2222)
-x.link_is_alive("s1", 3333, "s4", 3333)
-x.link_is_alive("s2", 4444, "s3", 4444)
-x.link_is_alive("s2", 5555, "s4", 5555)
-x.link_is_alive("s3", 6666, "s4", 6666)
-
-"""Watch the result in debbug mode. y1 contains the spanning tree."""
-y1 = x.get_all_allowed_links()
-
-time.sleep(7)
-x.link_is_alive("s1", 1111, "s2", 1111)
-x.link_is_alive("s1", 3333, "s4", 3333)
-x.link_is_alive("s2", 4444, "s3", 4444)
-x.link_is_alive("s3", 6666, "s4", 6666)
-
-"""Watch the result in debug mode."""
-expired = x.get_expired_links()
-
-for (a,port1,b,port2) in expired:
-    x.link_is_dead(a, port1, b, port2)
-
-"""Watch the results in debug mode. y4 contains the new spanning tree."""
-y3 = x.get_all_forbidden_links()
-y4 = x.get_all_allowed_links()
-
-"""Watch the results in debug mode. No entries exist yet."""
-y5 = x.get_enteries_to_add()
-y6 = x.get_enteries_to_remove()
-
-"""The controller has added the relevant entries for 2 links."""
-x.enteries_added("s3", 6666, "s4", 6666)
-x.enteries_added("s2", 4444, "s3", 4444)
-
-"""Watch the results in debug mode. These should be different than y5 and y6."""
-y7 = x.get_enteries_to_add()
-y8 = x.get_enteries_to_remove()
-
-"""An indication received that a switch is down"""
-x.switch_is_down("s4")
-
-"""Watch the results in debug mode.
-   The spanning tree is different now, as the graph has less nodes and edges."""
-y9 = x.get_all_allowed_links()
-print x
+if __name__ == '__main__':
+    """
+    This is an example that shows all the usage patterns of the model.
+    """
+    print "Hello, World!"
+    
+    x = DataModel()
+    
+    """Adding 4 switches."""
+    x.switch_is_up("s1")
+    x.switch_is_up("s2")
+    x.switch_is_up("s3")
+    x.switch_is_up("s4")
+    
+    """Indications received that 6 links are alive."""
+    x.link_is_alive("s1", 1111, "s2", 1111)
+    x.link_is_alive("s1", 2222, "s3", 2222)
+    x.link_is_alive("s1", 3333, "s4", 3333)
+    x.link_is_alive("s2", 4444, "s3", 4444)
+    x.link_is_alive("s2", 5555, "s4", 5555)
+    x.link_is_alive("s3", 6666, "s4", 6666)
+    
+    """Watch the result in debbug mode. y1 contains the spanning tree."""
+    y1 = x.get_all_allowed_links()
+    
+    time.sleep(7)
+    x.link_is_alive("s1", 1111, "s2", 1111)
+    x.link_is_alive("s1", 3333, "s4", 3333)
+    x.link_is_alive("s2", 4444, "s3", 4444)
+    x.link_is_alive("s3", 6666, "s4", 6666)
+    
+    """Watch the result in debug mode."""
+    expired = x.get_expired_links()
+    
+    for (a,port1,b,port2) in expired:
+        x.link_is_dead(a, port1, b, port2)
+    
+    """Watch the results in debug mode. y4 contains the new spanning tree."""
+    y3 = x.get_all_forbidden_links()
+    y4 = x.get_all_allowed_links()
+    
+    """Watch the results in debug mode. No entries exist yet."""
+    y5 = x.get_enteries_to_add()
+    y6 = x.get_enteries_to_remove()
+    
+    """The controller has added the relevant entries for 2 links."""
+    x.enteries_added("s3", 6666, "s4", 6666)
+    x.enteries_added("s2", 4444, "s3", 4444)
+    
+    """Watch the results in debug mode. These should be different than y5 and y6."""
+    y7 = x.get_enteries_to_add()
+    y8 = x.get_enteries_to_remove()
+    
+    """An indication received that a switch is down"""
+    x.switch_is_down("s4")
+    
+    """Watch the results in debug mode.
+       The spanning tree is different now, as the graph has less nodes and edges."""
+    y9 = x.get_all_allowed_links()
+    print x
