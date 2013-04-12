@@ -1,8 +1,3 @@
-'''
-Created on 6 באפר 2013
-
-@author: user
-'''
 import utils
 from DataModel import DataModel
 import pox.openflow.libopenflow_01 as of
@@ -30,10 +25,9 @@ class Discovery:
         Constructor
         '''        
         self.connected_switches = []
-        self.discovery_timer = utils.Timer(Discovery.DISCOVERY_INTERVAL, self._send_discovery_packets__, [], True)
+        self.discovery_timer = utils.Timer(Discovery.DISCOVERY_INTERVAL, self._send_discovery_packets, [], True)
         self.remove_expired_timer = utils.Timer(Discovery.REMOVE_EXPIRED_INTERVAL, self._remove_expired_links, [], True)
         self.graph = DataModel()
-      
     
     def _remove_expired_links(self):
         log.debug('Discovery: removing %i expired links'%(len(self.graph.get_expired_links()))) 
@@ -41,11 +35,11 @@ class Discovery:
          
             
     
-    def __send_discovery_packets__(self):
+    def _send_discovery_packets(self):
         '''
             sends discovery packets to all connected switches
         '''
-        log.debug('Discovery: sending LLDP to %i connected switches %i'%(len(self.connected_switches)))        
+        log.debug('Discovery: sending LLDP to %i connected switches' % (len(self.connected_switches)) )        
         for switch_event in self.connected_switches:
             self.send_LLDP_to_switch(switch_event)
     
@@ -61,24 +55,28 @@ class Discovery:
                 # Build LLDP packet
                 src = str(p.hw_addr)
                 port = p.port_no
+
                 lldp_p = lldp() # create LLDP payload
-                ch_id = chassis_id() # Add switch ID part
-                ch_id.subtype = 1
-                ch_id.id = str(event.dpid)
+                ch_id=chassis_id() # Add switch ID part
+                ch_id.fill(ch_id.SUB_LOCAL,bytes(hex(long(event.dpid))[2:-1])) # This works, the appendix example doesn't
+                #ch_id.subtype=chassis_id.SUB_LOCAL
+                #ch_id.id=bytes(hex(long(event.dpid))[2:-1]) #hex(long(event.dpid))
                 lldp_p.add_tlv(ch_id)
                 po_id = port_id() # Add port ID part
                 po_id.subtype = 2
                 po_id.id = str(port)
                 lldp_p.add_tlv(po_id)
                 tt = ttl() # Add TTL
-                tt.ttl = Discovery.LLDP_INTERVAL # == 1
+                tt.ttl = 1
                 lldp_p.add_tlv(tt)
                 lldp_p.add_tlv(end_tlv())
+                
                 ether = ethernet() # Create an Ethernet packet
                 ether.type = ethernet.LLDP_TYPE # Set its type to LLDP
                 ether.src = src # Set src, dst
                 ether.dst = dst
                 ether.payload = lldp_p # Set payload to be the LLDP payload
+                
                 # send LLDP packet
                 pkt = of.ofp_packet_out(action = of.ofp_action_output(port = port))
                 pkt.data = ether
@@ -91,7 +89,7 @@ class Discovery:
         Use event.dpid for switch ID, and event.connection.send(...) to send messages to the switch.
         '''
         self.connected_switches.append(event)
-        self.set_lldp_rule(event)
+        self.set_LLDP_rule(event)
         log.debug('Discovery: switch %i connected'%(event.dpid))
         self.graph.switch_is_up(event.dpid)
         
@@ -138,13 +136,14 @@ class Discovery:
         if event.parsed.type != ethernet.LLDP_TYPE:
             return
         
+        
         pkt = event.parsed
         lldp_p = pkt.payload
         ch_id = lldp_p.tlvs[0]
         po_id = lldp_p.tlvs[1]
         src_dpid = int(ch_id.id)
         src_port = int(po_id.id)
-        
+        log.debug("Received a LLDP packet on switch %i from %i" % (event.dpid,src_dpid))
         self.graph.link_is_alive( src_dpid, src_port, event.dpid, event.port)
         #self._tree_changed
             
