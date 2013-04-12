@@ -5,7 +5,7 @@ from pox.lib.packet.ethernet      import ethernet
 from pox.lib.packet.lldp          import lldp, chassis_id, port_id, end_tlv
 from pox.lib.packet.lldp          import ttl, system_description
 from pox.core import core
-
+from threading import Lock
 log = core.getLogger()
 
 class Discovery:
@@ -28,21 +28,28 @@ class Discovery:
         self.discovery_timer = utils.Timer(Discovery.DISCOVERY_INTERVAL, self._send_discovery_packets, [], True)
         self.remove_expired_timer = utils.Timer(Discovery.REMOVE_EXPIRED_INTERVAL, self._remove_expired_links, [], True)
         self.graph = DataModel()
+        self.handlers = []
+        self.change_lock = Lock()
     
     def _remove_expired_links(self):
-        log.debug('Discovery: removing %i expired links'%(len(self.graph.get_expired_links()))) 
-        #self.graph.delete_expired_links()
-         
+        expired_links=self.graph.get_expired_links()
+        if len(expired_links) > 0:
+            log.debug('Discovery: removing %i expired links %s' %(len(expired_links),expired_links)) 
+            for (a,port1,b,port2) in expired_links:
+                self.graph.link_is_dead(a, port1, b, port2)
+            print "Expired - allowed links %s" % (self.graph.get_all_allowed_links())
+            print "Expired - forbidden links %s" % (self.graph.get_all_forbidden_links())
+            self._tree_changed()
+            #self.graph.delete_expired_links()
             
     
     def _send_discovery_packets(self):
         '''
             sends discovery packets to all connected switches
         '''
-        log.debug('Discovery: sending LLDP to %i connected switches' % (len(self.connected_switches)) )        
+        #log.debug('Discovery: sending LLDP to %i connected switches' % (len(self.connected_switches)) )        
         for switch_event in self.connected_switches:
             self.send_LLDP_to_switch(switch_event)
-    
 
     def send_LLDP_to_switch(self,event):
         '''
@@ -60,7 +67,7 @@ class Discovery:
                 ch_id=chassis_id() # Add switch ID part
                 ch_id.fill(ch_id.SUB_LOCAL,bytes(hex(long(event.dpid))[2:-1])) # This works, the appendix example doesn't
                 #ch_id.subtype=chassis_id.SUB_LOCAL
-                #ch_id.id=bytes(hex(long(event.dpid))[2:-1]) #hex(long(event.dpid))
+                #ch_id.id=event.dpid
                 lldp_p.add_tlv(ch_id)
                 po_id = port_id() # Add port ID part
                 po_id.subtype = 2
@@ -89,11 +96,11 @@ class Discovery:
         Use event.dpid for switch ID, and event.connection.send(...) to send messages to the switch.
         '''
         self.connected_switches.append(event)
-        self.set_LLDP_rule(event)
+        self.set_LLDP_rule(event.connection)
         log.debug('Discovery: switch %i connected'%(event.dpid))
         self.graph.switch_is_up(event.dpid)
         
-    def set_LLDP_rule(self,event):
+    def set_LLDP_rule(self,connection):
         '''
         set a flow rule in the switch
         to pass all LLDP packets to the controller
@@ -108,8 +115,7 @@ class Discovery:
         action = of.ofp_action_output(port=of.OFPP_CONTROLLER)  # @UndefinedVariable
         fm.actions.append(action)
         # Send message to switch
-        event.connection.send(fm)
-
+        connection.send(fm)
         
     def _handle_ConnectionDown(self, event):
         '''
@@ -120,14 +126,24 @@ class Discovery:
         log.debug('Discovery: switch %i disconnected'%(event.dpid))
         
         self.graph.switch_is_down(event.dpid)
+        #self._tree_changed()
         
     def _handle_PortStatus(self, event):
         '''
         Will be called when a link changes. Specifically, when event.ofp.desc.config is 1, it means that the link is down. Use event.dpid for switch ID and event.port for port number.
         '''
+        dpid=event.dpid
+        port=event.port
         if event.ofp.desc.config == 1:
             #self.graph.link_is_dead(event.dpid, event.port)
-            log.debug('[switch %i]: port %i was disconnected'%(event.dpid, event.port))
+            log.debug('[switch %i]: port %i was disconnected'%(dpid, port))
+            links = self.graph.get_all_links_for_switch_and_port(dpid, port)
+            log.debug('[switch %i]: mark the following links as dead: %s' % (dpid,links))
+            for (s1,p1,s2,p2) in links:
+                self.graph.link_is_dead(s1, p1, s2, p2)
+            if (len(links)>0):
+                self._tree_changed()
+            
                 
     def _handle_PacketIn(self, event):
         '''
@@ -136,22 +152,36 @@ class Discovery:
         if event.parsed.type != ethernet.LLDP_TYPE:
             return
         
-        
         pkt = event.parsed
         lldp_p = pkt.payload
         ch_id = lldp_p.tlvs[0]
         po_id = lldp_p.tlvs[1]
         src_dpid = int(ch_id.id)
         src_port = int(po_id.id)
-        log.debug("Received a LLDP packet on switch %i from %i" % (event.dpid,src_dpid))
+        #log.debug("Received a LLDP packet on switch %i from %i" % (event.dpid,src_dpid))
         self.graph.link_is_alive( src_dpid, src_port, event.dpid, event.port)
-        #self._tree_changed
+        self._tree_changed()
             
         
     def register_tree_change(self,handler):
-        self.handler = handler
+        self.handlers.append(handler)
 
     def _tree_changed(self):
-        self.hanlder()
+        self.change_lock.acquire()
+        try:
+            allowed=self.graph.get_all_allowed_links()
+            forbidden=self.graph.get_all_forbidden_links()
+            to_add=self.graph.get_enteries_to_add()
+            to_remove=self.graph.get_enteries_to_remove()
+            for handler in self.handlers:
+                handler.handle(allowed,forbidden)
+            
+            for (s1,p1,s2,p2) in to_add:
+                self.graph.enteries_added(s1, p1, s2, p2)
+                
+            for (s1,p1,s2,p2) in to_remove:
+                self.graph.enteries_removed(s1, p1, s2, p2)
+        finally:    
+            self.change_lock.release()
 
         

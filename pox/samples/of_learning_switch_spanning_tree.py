@@ -7,7 +7,9 @@ This code is based on the official OpenFlow tutorial code.
 
 from pox.core import core
 import pox.openflow.libopenflow_01 as of
-
+from pox.samples.DataModel import DataModel
+from pox.samples.Discovery import Discovery
+from pox.lib.packet.ethernet import ethernet
 log = core.getLogger()
 
 class Switch2 (object):
@@ -18,9 +20,17 @@ class Switch2 (object):
     def __init__ (self, connection):
         self.connection = connection
         self.ports = {}
-
+        self.map_ports_to_eths = {}
+        self.discovery=Discovery()
+        self.forbidden_ports=[]
+        
         # This binds our PacketIn event listener
         connection.addListeners(self)
+        # This binds the discovery PacketIn event listener
+        connection.addListeners(self.discovery)
+        # This binds the switch to topology changes
+        self.discovery.register_tree_change(self)
+        
 
     def _handle_PacketIn (self, event):
         """
@@ -41,6 +51,7 @@ class Switch2 (object):
         flow_msg.match.dl_dst=dst_eth
         flow_msg.command=of.OFPFC_DELETE
         self.connection.send(flow_msg)
+        self.discovery.set_LLDP_rule(self.connection)
         
     def __flood(self, packet_in):
         ports=self.connection.features.ports
@@ -48,7 +59,6 @@ class Switch2 (object):
         buffer_id = packet_in.buffer_id
         raw_data = packet_in.data
         in_port=packet_in.in_port
-        
         msg=of.ofp_packet_out()
         if buffer_id != -1 and buffer_id is not None:
             # We got a buffer ID from the switch; use that
@@ -61,15 +71,54 @@ class Switch2 (object):
             msg.data = raw_data
             
         for port in ports:
-            # TODO skip forbidden ports
-            if (port.port_no <= of.OFPP_MAX) and (port.port_no != in_port):
-                log.debug('[switch %i] (flooding) adding action from in_port=%i to out_port=%i' % (self.connection.dpid, in_port,port.port_no))
-                action = of.ofp_action_output(port = port.port_no)
+            port_no=port.port_no
+            if (port_no < of.OFPP_MAX) and (port_no != in_port) and (port_no not in self.forbidden_ports):
+                #print '[switch %i] (flooding) adding action from in_port=%i to out_port=%i' % (self.connection.dpid, in_port,port_no)
+                action = of.ofp_action_output(port = port_no)
                 msg.actions.append(action)
         
         self.connection.send(msg)
-            
+    
+    def handle(self, allowed_links, forbidden_links):
+        """
+        Implement the topology-change handler 
+        """
+        #forbidden_links=datamodel.get_all_forbidden_links()
+        #entries_to_remove=datamodel.get_enteries_to_remove()
+        dpid=self.connection.dpid
+        #self.forbidden_ports=[]
+        new_forbidden_ports=[]
+        new_allowed_ports=[]
+        for (s1,p1,s2,p2) in forbidden_links:
+            if (s1==dpid):
+                new_forbidden_ports.append(p1)
+            if (s2==dpid):
+                new_forbidden_ports.append(p2)
         
+        for (s1,p1,s2,p2) in allowed_links:
+            if (s1==dpid):
+                new_allowed_ports.append(p1)
+            if (s2==dpid):
+                new_allowed_ports.append(p2)
+        
+        
+                
+        changed=False
+        for port in new_forbidden_ports:
+            if port not in self.forbidden_ports:
+                changed=True
+                if self.map_ports_to_eths.has_key(port):
+                    eth=self.map_ports_to_eths[port]
+                    print "[switch %i] Will remove forward rule for port %i addr %s " % (dpid, port, eth)
+                    #self.remove_flow_rule(eth)
+        for port in new_allowed_ports:
+            if port in self.forbidden_ports:
+                changed=True
+                        
+        self.forbidden_ports=new_forbidden_ports
+        if changed: 
+            print "[switch %i] New forbidden ports are %s" % (dpid, new_forbidden_ports)
+                
         
     def act_like_switch(self, packet, packet_in):
         """
@@ -81,13 +130,24 @@ class Switch2 (object):
         raw_data = packet_in.data
         in_port = packet_in.in_port
         
+        if packet.type == ethernet.LLDP_TYPE:
+            return
+        
+        if in_port in self.forbidden_ports:
+            return
+        
         if (eth_src in self.ports) and (self.ports[eth_src] != packet_in.in_port):
             log.debug('[switch %i] flow record removed: match[dl_dst=%s] -> out_port=%i' % (self.connection.dpid, eth_src, self.ports[eth_src]))
+            org_port=self.ports[eth_src]
             self.remove_flow_rule(eth_src)
+            if self.map_ports_to_eths.has_key(org_port):
+                del self.map_ports_to_eths[org_port]
         
         # learn locally about the port for this Ethernet address port
         # don't add a rule yet, because we need to filter packets by the in_port as well
         self.ports[eth_src] = packet_in.in_port
+        self.map_ports_to_eths[in_port]=eth_src
+        
         if eth_dst in self.ports:
             # we know everything in order to set the flowtable rule now
             out_port = self.ports[eth_dst]
