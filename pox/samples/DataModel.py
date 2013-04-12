@@ -52,6 +52,16 @@ class DataModel:
             self.update_spanning_tree()
         else:
             link.last_sync = datetime.now()
+            
+    def get_all_links_for_switch_and_port(self,s_id,port):
+        res = []
+        for (a,b) in self.graph.edges:
+            data = self.graph.edges[(a,b)]
+            if (a==s_id) and (data.port1==port):
+                res.append((a,data.port1,b,data.port2))
+            if (b==s_id) and (data.port2==port):
+                res.append((a,data.port1,b,data.port2))
+        return res
 
     """Returns all the links which haven't shown life signs for more than 6 seconds.
        This method should be called from a different thread every 3 seconds.
@@ -156,7 +166,6 @@ if __name__ == '__main__':
     This is an example that shows all the usage patterns of the model.
     """
     print "Hello, World!"
-    
     x = DataModel()
     
     """Adding 4 switches."""
@@ -164,7 +173,7 @@ if __name__ == '__main__':
     x.switch_is_up("s2")
     x.switch_is_up("s3")
     x.switch_is_up("s4")
-    
+
     """Indications received that 6 links are alive."""
     x.link_is_alive("s1", 1111, "s2", 1111)
     x.link_is_alive("s1", 2222, "s3", 2222)
@@ -175,7 +184,6 @@ if __name__ == '__main__':
     
     """Watch the result in debbug mode. y1 contains the spanning tree."""
     y1 = x.get_all_allowed_links()
-    
     time.sleep(7)
     x.link_is_alive("s1", 1111, "s2", 1111)
     x.link_is_alive("s1", 3333, "s4", 3333)
@@ -210,4 +218,4 @@ if __name__ == '__main__':
     """Watch the results in debug mode.
        The spanning tree is different now, as the graph has less nodes and edges."""
     y9 = x.get_all_allowed_links()
-    print x
+    
