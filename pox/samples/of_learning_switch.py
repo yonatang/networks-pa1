@@ -44,7 +44,7 @@ class Switch (object):
         
     def act_like_switch(self, packet, packet_in):
         """
-        Implement switch-like behaviour
+        Implement switch-like behavior
         """
         eth_src = packet.src
         eth_dst = packet.dst
